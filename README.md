@@ -13,36 +13,42 @@ Plataforma de "link na bio" (estilo Linktree) para a Pro Elite Assessoria Esport
 supabase/
   config.toml           # configuração do projeto Supabase local
   migrations/
-    20260916000000_initial_schema.sql   # schema inicial (organizações, usuários, perfis, links, analytics, RLS)
+    20260916000000_initial_schema.sql       # schema inicial (organizações, usuários, perfis, links, analytics, RLS em perfis)
+    20260917000000_rls_links_e_analytics.sql # RLS em links, sessoes, visualizacoes_pagina, cliques_link
   seed.sql               # dados de exemplo para desenvolvimento local
 ```
 
 ## Pré-requisitos
 
 - [Docker](https://www.docker.com/) (para o Supabase local)
-- [Supabase CLI](https://supabase.com/docs/guides/cli) — não está instalada nesta máquina ainda:
-  ```bash
-  npm install -g supabase
-  ```
+- Supabase CLI — instalada como dev dependency deste projeto (`npm install`), rode com `npx supabase <comando>`
 
 ## Rodando localmente
 
 ```bash
-supabase start      # sobe Postgres, Studio, Auth etc. localmente via Docker
-supabase db reset    # aplica as migrations + seed.sql do zero
+npx supabase start      # sobe Postgres, Studio, Auth etc. localmente via Docker
+npx supabase db reset    # aplica as migrations + seed.sql do zero
 ```
 
 O Supabase Studio fica disponível em `http://localhost:54323`.
 
 ## Deploy do schema num projeto Supabase remoto
 
+O projeto já está linkado ao Supabase remoto (`bcbuzthxrqwdimaihaoi`). Pra aplicar novas migrations:
+
 ```bash
-supabase link --project-ref <seu-project-ref>
-supabase db push
+npx supabase db push
+```
+
+Pra linkar em outra máquina:
+
+```bash
+npx supabase login
+npx supabase link --project-ref bcbuzthxrqwdimaihaoi
 ```
 
 ## Decisões de design do schema
 
 Ver os comentários no topo de [`20260916000000_initial_schema.sql`](supabase/migrations/20260916000000_initial_schema.sql) — cobrem multi-organização, fluxo de convite de usuários, slugs reservados, permissões de template por perfil, proteção contra redirecionador aberto (phishing) e anonimização de dados de analytics (LGPD).
 
-**Pendente:** a Row Level Security hoje só está habilitada em `perfis`. O mesmo padrão (membro vê só o próprio perfil, admin vê tudo da organização) precisa ser replicado em `links`, `sessoes`, `visualizacoes_pagina` e `cliques_link` antes de ir para produção.
+Row Level Security está habilitada em todas as tabelas de dado de perfil/analytics (`perfis`, `links`, `sessoes`, `visualizacoes_pagina`, `cliques_link`): dono do perfil ou admin da organização enxerga/edita; visitante público só enxerga perfis/links ativos e só pode inserir eventos de analytics contra perfis/links ativos. Ver [`20260917000000_rls_links_e_analytics.sql`](supabase/migrations/20260917000000_rls_links_e_analytics.sql).
