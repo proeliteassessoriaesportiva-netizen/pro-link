@@ -8,6 +8,7 @@ import {
   tipoDispositivo,
   origemReferencia,
 } from "@/lib/rastreamento";
+import { resolverTema, familiaDeFonte } from "@/lib/temas";
 
 export async function generateMetadata({
   params,
@@ -42,14 +43,19 @@ export default async function PaginaPublicaDoPerfil({
   const { slug } = await params;
   const supabase = await createClient();
 
+  // perfis se relaciona com temas de dois jeitos (tema_id direto, e
+  // via permissoes_template_perfil) — precisa nomear a FK pra
+  // desambiguar, senão o PostgREST recusa o embed (PGRST201).
   const { data: perfil } = await supabase
     .from("perfis")
-    .select("*")
+    .select("*, temas!perfis_tema_id_fkey ( configuracao )")
     .eq("slug", slug)
     .eq("esta_ativo", true)
     .maybeSingle();
 
   if (!perfil) notFound();
+
+  const tema = resolverTema(perfil.temas?.configuracao);
 
   const { data: links } = await supabase
     .from("links")
@@ -96,7 +102,14 @@ export default async function PaginaPublicaDoPerfil({
   });
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col items-center gap-6 px-4 py-12 text-center">
+    <main
+      style={{
+        background: tema.corFundo,
+        color: tema.corTexto,
+        fontFamily: familiaDeFonte(tema.fonte),
+      }}
+      className="mx-auto flex min-h-screen max-w-md flex-col items-center gap-6 px-4 py-12 text-center"
+    >
       {perfil.url_avatar && (
         // eslint-disable-next-line @next/next/no-img-element
         <img
@@ -109,12 +122,16 @@ export default async function PaginaPublicaDoPerfil({
       <div>
         <h1 className="text-xl font-semibold">{perfil.nome_exibicao}</h1>
         {perfil.cargo && (
-          <p className="text-sm text-white/60">{perfil.cargo}</p>
+          <p className="text-sm" style={{ opacity: 0.65 }}>
+            {perfil.cargo}
+          </p>
         )}
       </div>
 
       {perfil.biografia && (
-        <p className="text-sm text-white/70">{perfil.biografia}</p>
+        <p className="text-sm" style={{ opacity: 0.8 }}>
+          {perfil.biografia}
+        </p>
       )}
 
       <ul className="w-full space-y-3">
@@ -122,7 +139,12 @@ export default async function PaginaPublicaDoPerfil({
           <li key={link.id}>
             <a
               href={`/${perfil.slug}/go/${link.slug}`}
-              className="block w-full rounded-lg border border-white/20 px-4 py-3 text-sm hover:bg-white/5"
+              style={{
+                background: tema.corBotaoFundo,
+                color: tema.corBotaoTexto,
+                borderColor: tema.corBotaoBorda,
+              }}
+              className="block w-full rounded-lg border px-4 py-3 text-sm transition-opacity hover:opacity-90"
             >
               {link.titulo}
             </a>

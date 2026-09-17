@@ -86,17 +86,35 @@ const slug = email
   .replace(/[^a-z0-9]+/g, "-")
   .replace(/^-+|-+$/g, "");
 
-const { error: perfilError } = await admin.from("perfis").insert({
-  organizacao_id: org.id,
-  usuario_id: usuarioData.user.id,
-  slug,
-  nome_exibicao: email.split("@")[0],
-  esta_ativo: false,
-});
+const { data: perfilCriado, error: perfilError } = await admin
+  .from("perfis")
+  .insert({
+    organizacao_id: org.id,
+    usuario_id: usuarioData.user.id,
+    slug,
+    nome_exibicao: email.split("@")[0],
+    esta_ativo: false,
+  })
+  .select("id")
+  .single();
 
 if (perfilError) {
   console.error(`Usuário admin criado, mas falhou ao criar o perfil: ${perfilError.message}`);
   process.exit(1);
+}
+
+// Libera todos os temas ativos por padrão (mesma lógica de
+// app/convite/completar/actions.ts — ainda não existe UI de admin
+// pra curar isso tema a tema).
+const { data: temasAtivos } = await admin
+  .from("temas")
+  .select("id")
+  .eq("esta_ativo", true);
+
+if (temasAtivos && temasAtivos.length > 0) {
+  await admin.from("permissoes_template_perfil").insert(
+    temasAtivos.map((tema) => ({ perfil_id: perfilCriado.id, tema_id: tema.id })),
+  );
 }
 
 console.log(`\nAdmin criado: ${email} (perfil em /${slug}, inativo até você publicar).`);

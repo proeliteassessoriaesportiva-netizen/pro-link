@@ -63,13 +63,36 @@ export async function completarConvite(formData: FormData) {
         nomeBase,
       );
 
-      await admin.from("perfis").insert({
-        organizacao_id: usuarioRow.organizacao_id,
-        usuario_id: usuarioRow.id,
-        slug,
-        nome_exibicao: nomeBase,
-        esta_ativo: false,
-      });
+      const { data: perfilCriado } = await admin
+        .from("perfis")
+        .insert({
+          organizacao_id: usuarioRow.organizacao_id,
+          usuario_id: usuarioRow.id,
+          slug,
+          nome_exibicao: nomeBase,
+          esta_ativo: false,
+        })
+        .select("id")
+        .single();
+
+      // Libera todos os temas ativos por padrão — ainda não existe UI de
+      // admin pra curar isso tema a tema, então restringir aqui só
+      // deixaria todo perfil novo sem nenhum template disponível.
+      if (perfilCriado) {
+        const { data: temasAtivos } = await admin
+          .from("temas")
+          .select("id")
+          .eq("esta_ativo", true);
+
+        if (temasAtivos && temasAtivos.length > 0) {
+          await admin.from("permissoes_template_perfil").insert(
+            temasAtivos.map((tema) => ({
+              perfil_id: perfilCriado.id,
+              tema_id: tema.id,
+            })),
+          );
+        }
+      }
     }
   }
 

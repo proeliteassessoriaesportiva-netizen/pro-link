@@ -28,6 +28,7 @@ lib/
   dominio.ts                   # extração/validação de domínio contra a allowlist
   slug.ts                      # geração de slug único
   rastreamento.ts               # hash de visitante (LGPD) + device/origem pra analytics
+  temas.ts                     # resolve temas.configuracao (JSONB) pra cores/fonte, com fallback
   types.ts                     # aliases dos tipos gerados
 proxy.ts                       # middleware do Next: renova sessão e protege /dashboard
 scripts/
@@ -39,6 +40,7 @@ supabase/
     20260917000000_rls_links_e_analytics.sql # RLS em links, sessoes, visualizacoes_pagina, cliques_link
     20260917010000_rls_usuarios.sql          # RLS em usuarios
     20260917020000_corrige_recursao_rls.sql  # corrige recursão infinita nas policies de "é admin"
+    20260917030000_configuracao_temas.sql    # cores/fonte reais dos temas PRO/CLEAN/DARK
   seed.sql                     # dados de exemplo para desenvolvimento local
 types/
   database.ts                  # tipos TypeScript gerados a partir do schema (não editar à mão)
@@ -94,6 +96,8 @@ npx supabase login
 npx supabase link --project-ref bcbuzthxrqwdimaihaoi
 ```
 
+**Se `supabase db push`/`projects list` der `LegacyInvalidAccessTokenError`**: provavelmente sobrou uma variável de ambiente `SUPABASE_ACCESS_TOKEN` com lixo/placeholder (ela tem prioridade sobre o login salvo pela CLI). Cheque com `echo $SUPABASE_ACCESS_TOKEN` — se não for um token real (`sbp_...`), remova com `[Environment]::SetEnvironmentVariable("SUPABASE_ACCESS_TOKEN", $null, "User")` no PowerShell (ou `unset SUPABASE_ACCESS_TOKEN` só pra sessão atual do shell).
+
 ## Decisões de design do schema
 
 Ver os comentários no topo de [`20260916000000_initial_schema.sql`](supabase/migrations/20260916000000_initial_schema.sql) — cobrem multi-organização, fluxo de convite de usuários, slugs reservados, permissões de template por perfil, proteção contra redirecionador aberto (phishing) e anonimização de dados de analytics (LGPD).
@@ -118,7 +122,8 @@ npm run gen:types
 - **`/go/{slug}` global do comentário original do schema virou `/{perfilSlug}/go/{linkSlug}`**: a constraint no banco é `unique (perfil_id, slug)`, não um slug global — então o namespace de redirecionamento precisa ser escopado por perfil pra não colidir entre organizações/perfis diferentes.
 - **Link com domínio não aprovado** não é bloqueado, mas também não redireciona direto: cai em `/aviso-redirecionamento`, mostra a URL de destino e pede confirmação manual — o mesmo tipo de interstício que Twitter/Facebook usam pra link não confiável.
 - **Analytics (`sessoes`, `visualizacoes_pagina`, `cliques_link`)** são gravados via `after()` do Next (roda depois da resposta ser enviada, não atrasa a página) e são *best-effort*: falha silenciosamente, nunca quebra a navegação do visitante. Cada pageview/clique insere uma linha nova em `sessoes` (sem dedução) — a estimativa de visitante único é `count(distinct hash_visitante)` na hora de consultar, não na hora de gravar. Usa `lib/supabase/anon.ts` (sem cookies) em vez do client de `lib/supabase/server.ts`, porque `cookies()`/`headers()` não podem ser chamados dentro de `after()`; o id da sessão é gerado no cliente (`crypto.randomUUID()`) em vez de ler de volta com `.select()`, porque o visitante anônimo só tem permissão de INSERT nessas tabelas — encadear `.select()` depois do insert não retornaria a linha (RLS filtra o RETURNING).
-- Não implementado ainda: renderização por template (`temas.configuracao`) na página pública — hoje todo perfil usa o mesmo layout, independente do tema selecionado.
+- **Renderização por template**: `app/[slug]/page.tsx` busca `temas.configuracao` (JSONB: `corFundo`, `corTexto`, `corBotaoFundo`, `corBotaoTexto`, `corBotaoBorda`, `fonte`) do tema escolhido no perfil e aplica via inline `style` — cor dinâmica de dado não pode virar classe Tailwind (o JIT só gera classes que aparecem literalmente no código-fonte, não construídas em runtime a partir do banco). `lib/temas.ts` valida campo a campo e cai no padrão (visual atual, "PRO") pra qualquer coisa ausente/malformada, então um perfil sem tema escolhido nunca quebra. Como `perfis` se relaciona com `temas` de dois jeitos (`tema_id` direto e via `permissoes_template_perfil`), o select precisa nomear a FK (`temas!perfis_tema_id_fkey`) — sem isso o PostgREST recusa o embed por ambiguidade (`PGRST201`).
+  - Ainda não existe UI de admin pra curar quais temas cada perfil pode escolher (`permissoes_template_perfil`): todo perfil novo (via convite ou `bootstrap-admin`) recebe acesso a todos os temas `esta_ativo = true` automaticamente. Restringir por perfil hoje só é possível direto no banco.
 
 ### Revisão da parte pública (bio, clique, aviso)
 
