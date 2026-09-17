@@ -4,7 +4,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "gen:types": "supabase gen types --linked typescript > types/database.ts"
+    "gen:types": "supabase gen types --linked typescript > types/database.ts",
+    "bootstrap:admin": "node --env-file=.env.local scripts/bootstrap-admin.mjs"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.7",

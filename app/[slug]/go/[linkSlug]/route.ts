@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { after } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAnonClient } from "@/lib/supabase/anon";
 import {
   hashVisitante,
   tipoDispositivo,
@@ -45,21 +46,25 @@ export async function GET(
 
   after(async () => {
     try {
-      const cliente = await createClient();
-      const { data: sessao } = await cliente
-        .from("sessoes")
-        .insert({
-          perfil_id: perfil.id,
-          hash_visitante: hash,
-          origem_referencia: origem,
-        })
-        .select("id")
-        .single();
+      // Client sem cookies: cookies()/headers() não podem ser chamados
+      // dentro de after(), e essa escrita é anônima mesmo.
+      // Gera o id no cliente: o visitante anônimo só tem permissão de
+      // INSERT em sessoes (não SELECT), então encadear .select() depois
+      // do insert não retornaria a linha (RLS filtra o RETURNING).
+      const sessaoId = crypto.randomUUID();
+      const cliente = createAnonClient();
+
+      await cliente.from("sessoes").insert({
+        id: sessaoId,
+        perfil_id: perfil.id,
+        hash_visitante: hash,
+        origem_referencia: origem,
+      });
 
       await cliente.from("cliques_link").insert({
         link_id: link.id,
         perfil_id: perfil.id,
-        sessao_id: sessao?.id ?? null,
+        sessao_id: sessaoId,
         tipo_dispositivo: dispositivo,
       });
     } catch {

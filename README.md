@@ -23,19 +23,22 @@ app/
   [slug]/go/[linkSlug]/        # redirecionador de clique — checa dominio_aprovado
   aviso-redirecionamento/      # interstício quando o domínio de destino não está aprovado
 lib/
-  supabase/                    # clients (browser, server, admin/service-role, middleware)
+  supabase/                    # clients (browser, server, admin/service-role, anon, middleware)
   dados.ts                     # helpers de leitura (usuário atual, perfil do usuário)
   dominio.ts                   # extração/validação de domínio contra a allowlist
   slug.ts                      # geração de slug único
   rastreamento.ts               # hash de visitante (LGPD) + device/origem pra analytics
   types.ts                     # aliases dos tipos gerados
 proxy.ts                       # middleware do Next: renova sessão e protege /dashboard
+scripts/
+  bootstrap-admin.mjs          # cria o primeiro usuário admin (roda uma vez por ambiente)
 supabase/
   config.toml                  # configuração do projeto Supabase local
   migrations/
     20260916000000_initial_schema.sql        # schema inicial (RLS em perfis)
     20260917000000_rls_links_e_analytics.sql # RLS em links, sessoes, visualizacoes_pagina, cliques_link
     20260917010000_rls_usuarios.sql          # RLS em usuarios
+    20260917020000_corrige_recursao_rls.sql  # corrige recursão infinita nas policies de "é admin"
   seed.sql                     # dados de exemplo para desenvolvimento local
 types/
   database.ts                  # tipos TypeScript gerados a partir do schema (não editar à mão)
@@ -55,6 +58,14 @@ cp .env.local.example .env.local
 ```
 
 Preencha `NEXT_PUBLIC_SUPABASE_ANON_KEY` e `SUPABASE_SERVICE_ROLE_KEY` com os valores de **Project Settings → API** no [dashboard do Supabase](https://supabase.com/dashboard/project/bcbuzthxrqwdimaihaoi/settings/api). A service role key só é usada em server actions (convite de membros) — nunca é enviada ao navegador.
+
+**Primeiro admin**: o fluxo normal de convite (`dashboard/equipe`) exige estar logado como admin — pra criar o primeiro, rode:
+
+```bash
+npm run bootstrap:admin
+```
+
+Pede e-mail/senha no terminal e cria o usuário direto pelo service role.
 
 ## Rodando localmente
 
@@ -91,6 +102,8 @@ Row Level Security está habilitada em **todas** as tabelas (`usuarios`, `perfis
 
 Escrita em `usuarios` (convite, ativação, papel) não tem policy pra anon/authenticated de propósito — só passa pelo service role nas server actions (`lib/supabase/admin.ts`), pra impedir que um usuário altere seu próprio papel ou organização.
 
+**Cuidado ao escrever policy de "admin vê tudo da organização"**: a primeira versão checava admin com um subquery direto em `usuarios` dentro da própria policy de `usuarios` — Postgres detecta isso como recursão infinita (`42P17`) e todo SELECT em `usuarios` (e em qualquer tabela cuja policy também checasse admin assim) passava a falhar, quebrando o login inteiro. Corrigido em [`20260917020000_corrige_recursao_rls.sql`](supabase/migrations/20260917020000_corrige_recursao_rls.sql) movendo a checagem pra uma função `security definer` (`e_admin_da_organizacao`), que roda com o dono da tabela e não reaciona a própria RLS.
+
 ## Tipos TypeScript
 
 Os tipos em [`types/database.ts`](types/database.ts) são gerados a partir do schema do banco remoto e não devem ser editados à mão. Depois de qualquer migration nova:
@@ -104,5 +117,5 @@ npm run gen:types
 - **Convite de membro**: admin convida por e-mail (`dashboard/equipe`) → Supabase Auth manda o magic-link → `/auth/callback` troca o code por sessão → `/convite/completar` define a senha e ativa a conta. Nesse passo também é criado o `perfis` da pessoa (slug derivado do e-mail, começa **inativo** até ela preencher e publicar).
 - **`/go/{slug}` global do comentário original do schema virou `/{perfilSlug}/go/{linkSlug}`**: a constraint no banco é `unique (perfil_id, slug)`, não um slug global — então o namespace de redirecionamento precisa ser escopado por perfil pra não colidir entre organizações/perfis diferentes.
 - **Link com domínio não aprovado** não é bloqueado, mas também não redireciona direto: cai em `/aviso-redirecionamento`, mostra a URL de destino e pede confirmação manual — o mesmo tipo de interstício que Twitter/Facebook usam pra link não confiável.
-- **Analytics (`sessoes`, `visualizacoes_pagina`, `cliques_link`)** são gravados via `after()` do Next (roda depois da resposta ser enviada, não atrasa a página) e são *best-effort*: falha silenciosamente, nunca quebra a navegação do visitante. Cada pageview/clique insere uma linha nova em `sessoes` (sem dedução) — a estimativa de visitante único é `count(distinct hash_visitante)` na hora de consultar, não na hora de gravar.
+- **Analytics (`sessoes`, `visualizacoes_pagina`, `cliques_link`)** são gravados via `after()` do Next (roda depois da resposta ser enviada, não atrasa a página) e são *best-effort*: falha silenciosamente, nunca quebra a navegação do visitante. Cada pageview/clique insere uma linha nova em `sessoes` (sem dedução) — a estimativa de visitante único é `count(distinct hash_visitante)` na hora de consultar, não na hora de gravar. Usa `lib/supabase/anon.ts` (sem cookies) em vez do client de `lib/supabase/server.ts`, porque `cookies()`/`headers()` não podem ser chamados dentro de `after()`; o id da sessão é gerado no cliente (`crypto.randomUUID()`) em vez de ler de volta com `.select()`, porque o visitante anônimo só tem permissão de INSERT nessas tabelas — encadear `.select()` depois do insert não retornaria a linha (RLS filtra o RETURNING).
 - Não implementado ainda: renderização por template (`temas.configuracao`) na página pública — hoje todo perfil usa o mesmo layout, independente do tema selecionado.
