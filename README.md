@@ -1,38 +1,72 @@
 # Pro Link
 
-Plataforma de "link na bio" (estilo Linktree) para a Pro Elite Assessoria Esportiva, com suporte multi-organização desde o schema.
+Plataforma de "link na bio" (estilo Linktree) para a Pro Elite Assessoria Esportiva, com suporte multi-organização desde o schema. Backend em PostgreSQL/Supabase, frontend em Next.js.
 
-## Stack do banco
+## Stack
 
-- PostgreSQL via [Supabase](https://supabase.com)
+- [Next.js 16](https://nextjs.org) (App Router) + [Tailwind CSS 4](https://tailwindcss.com)
+- PostgreSQL via [Supabase](https://supabase.com) (`@supabase/ssr` + `@supabase/supabase-js`)
 - Migrations versionadas em [`supabase/migrations`](supabase/migrations)
 
 ## Estrutura
 
 ```
+app/
+  login/                      # login com e-mail/senha
+  auth/callback/               # troca o code do magic-link/convite por sessão
+  convite/completar/           # ativação de conta convidada (define senha, cria perfil)
+  dashboard/                   # área logada
+    perfil/                    # editor do próprio perfil (bio, redes, tema, SEO)
+    links/                     # gerenciador de links (CRUD, ordem, ativo/inativo)
+    equipe/                    # admin: convidar/suspender membros da organização
+  [slug]/                      # página pública do perfil (SSR, registra pageview)
+  [slug]/go/[linkSlug]/        # redirecionador de clique — checa dominio_aprovado
+  aviso-redirecionamento/      # interstício quando o domínio de destino não está aprovado
+lib/
+  supabase/                    # clients (browser, server, admin/service-role, middleware)
+  dados.ts                     # helpers de leitura (usuário atual, perfil do usuário)
+  dominio.ts                   # extração/validação de domínio contra a allowlist
+  slug.ts                      # geração de slug único
+  rastreamento.ts               # hash de visitante (LGPD) + device/origem pra analytics
+  types.ts                     # aliases dos tipos gerados
+proxy.ts                       # middleware do Next: renova sessão e protege /dashboard
 supabase/
-  config.toml           # configuração do projeto Supabase local
+  config.toml                  # configuração do projeto Supabase local
   migrations/
-    20260916000000_initial_schema.sql       # schema inicial (organizações, usuários, perfis, links, analytics, RLS em perfis)
+    20260916000000_initial_schema.sql        # schema inicial (RLS em perfis)
     20260917000000_rls_links_e_analytics.sql # RLS em links, sessoes, visualizacoes_pagina, cliques_link
-  seed.sql               # dados de exemplo para desenvolvimento local
+    20260917010000_rls_usuarios.sql          # RLS em usuarios
+  seed.sql                     # dados de exemplo para desenvolvimento local
 types/
-  database.ts             # tipos TypeScript gerados a partir do schema (não editar à mão)
+  database.ts                  # tipos TypeScript gerados a partir do schema (não editar à mão)
 ```
 
 ## Pré-requisitos
 
+- [Node.js](https://nodejs.org) 20+
 - [Docker](https://www.docker.com/) (para o Supabase local)
 - Supabase CLI — instalada como dev dependency deste projeto (`npm install`), rode com `npx supabase <comando>`
+
+## Configuração
+
+```bash
+npm install
+cp .env.local.example .env.local
+```
+
+Preencha `NEXT_PUBLIC_SUPABASE_ANON_KEY` e `SUPABASE_SERVICE_ROLE_KEY` com os valores de **Project Settings → API** no [dashboard do Supabase](https://supabase.com/dashboard/project/bcbuzthxrqwdimaihaoi/settings/api). A service role key só é usada em server actions (convite de membros) — nunca é enviada ao navegador.
 
 ## Rodando localmente
 
 ```bash
-npx supabase start      # sobe Postgres, Studio, Auth etc. localmente via Docker
-npx supabase db reset    # aplica as migrations + seed.sql do zero
+npx supabase start   # sobe Postgres, Studio, Auth etc. localmente via Docker
+npx supabase db reset # aplica as migrations + seed.sql do zero
+npm run dev            # sobe o Next.js em http://localhost:3000
 ```
 
-O Supabase Studio fica disponível em `http://localhost:54323`.
+O Supabase Studio fica disponível em `http://localhost:54323`. Rodando contra o Supabase local, aponte `.env.local` pra `http://127.0.0.1:54321` e as chaves que `supabase start` imprime no terminal.
+
+Contra o projeto remoto já linkado, basta `npm run dev` (com as chaves reais do `.env.local`).
 
 ## Deploy do schema num projeto Supabase remoto
 
@@ -53,7 +87,9 @@ npx supabase link --project-ref bcbuzthxrqwdimaihaoi
 
 Ver os comentários no topo de [`20260916000000_initial_schema.sql`](supabase/migrations/20260916000000_initial_schema.sql) — cobrem multi-organização, fluxo de convite de usuários, slugs reservados, permissões de template por perfil, proteção contra redirecionador aberto (phishing) e anonimização de dados de analytics (LGPD).
 
-Row Level Security está habilitada em todas as tabelas de dado de perfil/analytics (`perfis`, `links`, `sessoes`, `visualizacoes_pagina`, `cliques_link`): dono do perfil ou admin da organização enxerga/edita; visitante público só enxerga perfis/links ativos e só pode inserir eventos de analytics contra perfis/links ativos. Ver [`20260917000000_rls_links_e_analytics.sql`](supabase/migrations/20260917000000_rls_links_e_analytics.sql).
+Row Level Security está habilitada em **todas** as tabelas (`usuarios`, `perfis`, `links`, `sessoes`, `visualizacoes_pagina`, `cliques_link`): dono do registro ou admin da organização enxerga/edita; visitante público só enxerga perfis/links ativos e só pode inserir eventos de analytics contra perfis/links ativos. Ver [`20260917000000_rls_links_e_analytics.sql`](supabase/migrations/20260917000000_rls_links_e_analytics.sql) e [`20260917010000_rls_usuarios.sql`](supabase/migrations/20260917010000_rls_usuarios.sql).
+
+Escrita em `usuarios` (convite, ativação, papel) não tem policy pra anon/authenticated de propósito — só passa pelo service role nas server actions (`lib/supabase/admin.ts`), pra impedir que um usuário altere seu próprio papel ou organização.
 
 ## Tipos TypeScript
 
@@ -62,3 +98,11 @@ Os tipos em [`types/database.ts`](types/database.ts) são gerados a partir do sc
 ```bash
 npm run gen:types
 ```
+
+## Decisões do frontend
+
+- **Convite de membro**: admin convida por e-mail (`dashboard/equipe`) → Supabase Auth manda o magic-link → `/auth/callback` troca o code por sessão → `/convite/completar` define a senha e ativa a conta. Nesse passo também é criado o `perfis` da pessoa (slug derivado do e-mail, começa **inativo** até ela preencher e publicar).
+- **`/go/{slug}` global do comentário original do schema virou `/{perfilSlug}/go/{linkSlug}`**: a constraint no banco é `unique (perfil_id, slug)`, não um slug global — então o namespace de redirecionamento precisa ser escopado por perfil pra não colidir entre organizações/perfis diferentes.
+- **Link com domínio não aprovado** não é bloqueado, mas também não redireciona direto: cai em `/aviso-redirecionamento`, mostra a URL de destino e pede confirmação manual — o mesmo tipo de interstício que Twitter/Facebook usam pra link não confiável.
+- **Analytics (`sessoes`, `visualizacoes_pagina`, `cliques_link`)** são gravados via `after()` do Next (roda depois da resposta ser enviada, não atrasa a página) e são *best-effort*: falha silenciosamente, nunca quebra a navegação do visitante. Cada pageview/clique insere uma linha nova em `sessoes` (sem dedução) — a estimativa de visitante único é `count(distinct hash_visitante)` na hora de consultar, não na hora de gravar.
+- Não implementado ainda: renderização por template (`temas.configuracao`) na página pública — hoje todo perfil usa o mesmo layout, independente do tema selecionado.
