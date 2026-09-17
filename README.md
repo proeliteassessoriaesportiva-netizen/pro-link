@@ -19,6 +19,7 @@ app/
     perfil/                    # editor do próprio perfil (bio, redes, tema, SEO)
     links/                     # gerenciador de links (CRUD, ordem, ativo/inativo)
     equipe/                    # admin: convidar/suspender membros da organização
+    equipe/[perfilId]/temas/   # admin: conceder/revogar quais temas um perfil pode escolher
   [slug]/                      # página pública do perfil (SSR, registra pageview)
   [slug]/go/[linkSlug]/        # redirecionador de clique — checa dominio_aprovado
   aviso-redirecionamento/      # interstício quando o domínio de destino não está aprovado
@@ -41,6 +42,7 @@ supabase/
     20260917010000_rls_usuarios.sql          # RLS em usuarios
     20260917020000_corrige_recursao_rls.sql  # corrige recursão infinita nas policies de "é admin"
     20260917030000_configuracao_temas.sql    # cores/fonte reais dos temas PRO/CLEAN/DARK
+    20260917040000_rls_permissoes_template_perfil.sql # RLS em permissoes_template_perfil (admin-only)
   seed.sql                     # dados de exemplo para desenvolvimento local
 types/
   database.ts                  # tipos TypeScript gerados a partir do schema (não editar à mão)
@@ -123,7 +125,8 @@ npm run gen:types
 - **Link com domínio não aprovado** não é bloqueado, mas também não redireciona direto: cai em `/aviso-redirecionamento`, mostra a URL de destino e pede confirmação manual — o mesmo tipo de interstício que Twitter/Facebook usam pra link não confiável.
 - **Analytics (`sessoes`, `visualizacoes_pagina`, `cliques_link`)** são gravados via `after()` do Next (roda depois da resposta ser enviada, não atrasa a página) e são *best-effort*: falha silenciosamente, nunca quebra a navegação do visitante. Cada pageview/clique insere uma linha nova em `sessoes` (sem dedução) — a estimativa de visitante único é `count(distinct hash_visitante)` na hora de consultar, não na hora de gravar. Usa `lib/supabase/anon.ts` (sem cookies) em vez do client de `lib/supabase/server.ts`, porque `cookies()`/`headers()` não podem ser chamados dentro de `after()`; o id da sessão é gerado no cliente (`crypto.randomUUID()`) em vez de ler de volta com `.select()`, porque o visitante anônimo só tem permissão de INSERT nessas tabelas — encadear `.select()` depois do insert não retornaria a linha (RLS filtra o RETURNING).
 - **Renderização por template**: `app/[slug]/page.tsx` busca `temas.configuracao` (JSONB: `corFundo`, `corTexto`, `corBotaoFundo`, `corBotaoTexto`, `corBotaoBorda`, `fonte`) do tema escolhido no perfil e aplica via inline `style` — cor dinâmica de dado não pode virar classe Tailwind (o JIT só gera classes que aparecem literalmente no código-fonte, não construídas em runtime a partir do banco). `lib/temas.ts` valida campo a campo e cai no padrão (visual atual, "PRO") pra qualquer coisa ausente/malformada, então um perfil sem tema escolhido nunca quebra. Como `perfis` se relaciona com `temas` de dois jeitos (`tema_id` direto e via `permissoes_template_perfil`), o select precisa nomear a FK (`temas!perfis_tema_id_fkey`) — sem isso o PostgREST recusa o embed por ambiguidade (`PGRST201`).
-  - Ainda não existe UI de admin pra curar quais temas cada perfil pode escolher (`permissoes_template_perfil`): todo perfil novo (via convite ou `bootstrap-admin`) recebe acesso a todos os temas `esta_ativo = true` automaticamente. Restringir por perfil hoje só é possível direto no banco.
+  - Todo perfil novo (via convite ou `bootstrap-admin`) recebe acesso a todos os temas `esta_ativo = true` automaticamente, pra o seletor nunca ficar vazio. Um admin pode restringir isso pessoa a pessoa em **Equipe → Temas** (`dashboard/equipe/[perfilId]/temas`).
+  - `permissoes_template_perfil` não tinha RLS desde o schema inicial — sem isso, qualquer usuário autenticado (não só admin) conseguia se conceder qualquer template via API direta, mesmo com a UI restringindo a escolha visualmente. Corrigido em [`20260917040000_rls_permissoes_template_perfil.sql`](supabase/migrations/20260917040000_rls_permissoes_template_perfil.sql): leitura é própria-ou-admin, escrita (conceder/revogar) é admin-only.
 
 ### Revisão da parte pública (bio, clique, aviso)
 

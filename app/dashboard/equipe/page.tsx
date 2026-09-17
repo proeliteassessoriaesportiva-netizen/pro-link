@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getUsuarioAtual } from "@/lib/dados";
@@ -16,7 +17,7 @@ export default async function EquipePage({
   const supabase = await createClient();
   const { data: membros } = await supabase
     .from("usuarios")
-    .select("*")
+    .select("*, perfis ( id, slug )")
     .eq("organizacao_id", usuario.organizacao_id)
     .order("criado_em", { ascending: true });
 
@@ -48,18 +49,29 @@ export default async function EquipePage({
               </p>
             </div>
 
-            {membro.id !== usuario.id && (
-              <form action={alternarStatusMembro}>
-                <input type="hidden" name="id" value={membro.id} />
-                <input type="hidden" name="status" value={membro.status} />
-                <button
-                  type="submit"
+            <div className="flex items-center gap-2">
+              {membro.perfis && (
+                <Link
+                  href={`/dashboard/equipe/${membro.perfis.id}/temas`}
                   className="rounded bg-white/10 px-3 py-1.5 text-xs hover:bg-white/20"
                 >
-                  {membro.status === "suspenso" ? "Reativar" : "Suspender"}
-                </button>
-              </form>
-            )}
+                  Temas
+                </Link>
+              )}
+
+              {membro.id !== usuario.id && (
+                <form action={alternarStatusMembro}>
+                  <input type="hidden" name="id" value={membro.id} />
+                  <input type="hidden" name="status" value={membro.status} />
+                  <button
+                    type="submit"
+                    className="rounded bg-white/10 px-3 py-1.5 text-xs hover:bg-white/20"
+                  >
+                    {membro.status === "suspenso" ? "Reativar" : "Suspender"}
+                  </button>
+                </form>
+              )}
+            </div>
           </li>
         ))}
       </ul>
