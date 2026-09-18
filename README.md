@@ -23,9 +23,12 @@ app/
   [slug]/                      # página pública do perfil (SSR, registra pageview)
   [slug]/go/[linkSlug]/        # redirecionador de clique — checa dominio_aprovado
   aviso-redirecionamento/      # interstício quando o domínio de destino não está aprovado
+components/
+  graficos/                    # GraficoLinhas (série temporal) e GraficoBarras (ranking) — client components
 lib/
   supabase/                    # clients (browser, server, admin/service-role, anon, middleware)
   dados.ts                     # helpers de leitura (usuário atual, perfil do usuário)
+  analytics.ts                  # agregação em JS das linhas de analytics (série diária, ranking por categoria)
   dominio.ts                   # extração/validação de domínio contra a allowlist
   slug.ts                      # geração de slug único
   rastreamento.ts               # hash de visitante (LGPD) + device/origem pra analytics
@@ -127,6 +130,7 @@ npm run gen:types
 - **Renderização por template**: `app/[slug]/page.tsx` busca `temas.configuracao` (JSONB: `corFundo`, `corTexto`, `corBotaoFundo`, `corBotaoTexto`, `corBotaoBorda`, `fonte`) do tema escolhido no perfil e aplica via inline `style` — cor dinâmica de dado não pode virar classe Tailwind (o JIT só gera classes que aparecem literalmente no código-fonte, não construídas em runtime a partir do banco). `lib/temas.ts` valida campo a campo e cai no padrão (visual atual, "PRO") pra qualquer coisa ausente/malformada, então um perfil sem tema escolhido nunca quebra. Como `perfis` se relaciona com `temas` de dois jeitos (`tema_id` direto e via `permissoes_template_perfil`), o select precisa nomear a FK (`temas!perfis_tema_id_fkey`) — sem isso o PostgREST recusa o embed por ambiguidade (`PGRST201`).
   - Todo perfil novo (via convite ou `bootstrap-admin`) recebe acesso a todos os temas `esta_ativo = true` automaticamente, pra o seletor nunca ficar vazio. Um admin pode restringir isso pessoa a pessoa em **Equipe → Temas** (`dashboard/equipe/[perfilId]/temas`).
   - `permissoes_template_perfil` não tinha RLS desde o schema inicial — sem isso, qualquer usuário autenticado (não só admin) conseguia se conceder qualquer template via API direta, mesmo com a UI restringindo a escolha visualmente. Corrigido em [`20260917040000_rls_permissoes_template_perfil.sql`](supabase/migrations/20260917040000_rls_permissoes_template_perfil.sql): leitura é própria-ou-admin, escrita (conceder/revogar) é admin-only.
+- **Dashboard de analytics**: `dashboard/page.tsx` busca as linhas cruas de `visualizacoes_pagina`/`cliques_link` no intervalo escolhido (7/30/90 dias, um filtro só, no topo, escopando os três widgets) e agrega em JS (`lib/analytics.ts`) — série diária zero-preenchida, ranking por origem e por dispositivo com a cauda dobrada em "Outros" acima de 6 categorias. Nesse volume de dados (perfil de um criador, não uma rede) isso é mais simples que escrever uma function/view SQL de agregação. Os gráficos (`components/graficos/`) seguem o método da skill `dataviz`: paleta categórica validada (não escolhida no olho), 1 cor por série de tempo (azul/laranja), 1 cor só por gráfico de barra (é magnitude, não identidade), crosshair+tooltip na linha, tooltip por barra, e um toggle "Ver como tabela" em cada gráfico (o par WCAG-limpo de qualquer chart).
 
 ### Revisão da parte pública (bio, clique, aviso)
 
